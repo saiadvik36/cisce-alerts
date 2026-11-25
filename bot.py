@@ -1,17 +1,28 @@
 import json
 import os
+import urllib.request
 from bs4 import BeautifulSoup
-from curl_cffi import requests
+from playwright.sync_api import sync_playwright
 
 CISCE_URL = "https://cisce.org"
 WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
 MEMORY_FILE = "seen.json"
 
 def get_website_links():
-    resp = requests.get(CISCE_URL, impersonate="chrome", timeout=20)
-    resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        )
+        resp = page.goto(CISCE_URL, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(3000)
+        if resp and resp.status >= 400:
+            browser.close()
+            raise RuntimeError(f"Blocked by cisce.org with HTTP {resp.status}")
+        html = page.content()
+        browser.close()
 
+    soup = BeautifulSoup(html, "html.parser")
     found_updates = {}
     keywords = ["icse", "isc", "circular", "notice", "result", "timetable", "date sheet", "syllabus", ".pdf"]
 
@@ -36,8 +47,12 @@ def send_to_discord(title, link):
             "color": 3447003
         }]
     }
-    resp = requests.post(WEBHOOK_URL, json=data, timeout=15)
-    resp.raise_for_status()
+    req = urllib.request.Request(
+        WEBHOOK_URL,
+        data=json.dumps(data).encode("utf-8"),
+        headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+    )
+    urllib.request.urlopen(req, timeout=15)
 
 def main():
     if os.path.exists(MEMORY_FILE):
@@ -60,3 +75,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
