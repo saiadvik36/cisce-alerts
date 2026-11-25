@@ -1,19 +1,16 @@
 import json
 import os
-import urllib.request
 from bs4 import BeautifulSoup
+from curl_cffi import requests
 
 CISCE_URL = "https://cisce.org"
 WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
 MEMORY_FILE = "seen.json"
 
 def get_website_links():
-    request = urllib.request.Request(
-        CISCE_URL,
-        headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"}
-    )
-    html = urllib.request.urlopen(request, timeout=20).read().decode("utf-8", errors="ignore")
-    soup = BeautifulSoup(html, "html.parser")
+    resp = requests.get(CISCE_URL, impersonate="chrome", timeout=20)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
 
     found_updates = {}
     keywords = ["icse", "isc", "circular", "notice", "result", "timetable", "date sheet", "syllabus", ".pdf"]
@@ -39,12 +36,8 @@ def send_to_discord(title, link):
             "color": 3447003
         }]
     }
-    req = urllib.request.Request(
-        WEBHOOK_URL,
-        data=json.dumps(data).encode("utf-8"),
-        headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
-    )
-    urllib.request.urlopen(req, timeout=15)
+    resp = requests.post(WEBHOOK_URL, json=data, timeout=15)
+    resp.raise_for_status()
 
 def main():
     if os.path.exists(MEMORY_FILE):
