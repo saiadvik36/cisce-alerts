@@ -1,49 +1,32 @@
 import json
 import os
 import urllib.request
-from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
+import xml.etree.ElementTree as ET
 
-CISCE_URL = "https://cisce.org"
+RSS_URL = "https://news.google.com/rss/search?q=CISCE+ICSE+ISC+(circular+OR+notice+OR+timetable+OR+result+OR+datesheet)&hl=en-IN&gl=IN&ceid=IN:en"
 WEBHOOK_URL = os.environ["DISCORD_WEBHOOK_URL"]
 MEMORY_FILE = "seen.json"
 
-def get_website_links():
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        )
-        resp = page.goto(CISCE_URL, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(3000)
-        if resp and resp.status >= 400:
-            browser.close()
-            raise RuntimeError(f"Blocked by cisce.org with HTTP {resp.status}")
-        html = page.content()
-        browser.close()
+def get_updates():
+    req = urllib.request.Request(RSS_URL, headers={"User-Agent": "Mozilla/5.0"})
+    xml_data = urllib.request.urlopen(req, timeout=20).read()
+    root = ET.fromstring(xml_data)
 
-    soup = BeautifulSoup(html, "html.parser")
-    found_updates = {}
-    keywords = ["icse", "isc", "circular", "notice", "result", "timetable", "date sheet", "syllabus", ".pdf"]
-
-    for tag in soup.find_all("a", href=True):
-        title = " ".join(tag.get_text().split())
-        link = tag["href"].strip()
-        combined = (title + " " + link).lower()
-        if len(title) > 6 and any(word in combined for word in keywords):
-            if not link.startswith("http"):
-                link = f"{CISCE_URL.rstrip('/')}/{link.lstrip('/')}"
-            found_updates[link] = title
-
-    return found_updates
+    found = {}
+    for item in root.findall(".//item")[:20]:
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        if title and link:
+            found[link] = title
+    return found
 
 def send_to_discord(title, link):
     data = {
-        "username": "CISCE Official Alerts",
+        "username": "CISCE Alerts",
         "embeds": [{
             "title": title[:250],
             "url": link,
-            "description": "New circular or update posted on cisce.org",
+            "description": "New CISCE / ICSE / ISC update detected.",
             "color": 3447003
         }]
     }
@@ -62,7 +45,7 @@ def main():
         seen_links = set()
 
     is_first_run = (len(seen_links) == 0)
-    current_updates = get_website_links()
+    current_updates = get_updates()
 
     for link, title in current_updates.items():
         if link not in seen_links:
